@@ -9,7 +9,13 @@ on:
     paths-ignore:
       - 'docs/**'
       - 'tests/**'
-      - 'helm-charts/**'
+      - 'Helm/**'
+      - 'error.md'
+      - 'IMPLEMENTATION.md'
+      - 'README.md'
+      - 'EKS/**'
+      - 'GITOPS/**'
+      - 'ingress-controller/**'
 # job definitions
 jobs:
   build:
