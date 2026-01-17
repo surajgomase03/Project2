@@ -1,0 +1,88 @@
+name: CI
+
+# Trigger the workflow on pushes and pull requests to the main branch,
+on:
+  push:
+    branches:
+      - main
+# Ignore changes in documentation and test files directories
+    paths-ignore:
+      - 'docs/**'
+      - 'tests/**'
+      - 'helm-charts/**'
+# job definitions
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+# code checkout using github marketplace action    
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+#Application build and test
+      - name: Application build
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o main .
+
+      - name: Run tests
+        run: go test ./...
+
+  code-quality:
+    runs-on: ubuntu-latest
+# need to wait for build job to complete
+    needs: build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+#Static code analysis using golangci-lint
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.21
+
+  build-docker-image:
+    runs-on: ubuntu-latest
+    needs: code-quality
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+# Docker image build and push to Docker Hub
+#Buildx setup, login and build-push actions from Docker official marketplace actions
+      - name: set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+# Docker login using secrets stored in GitHub repository settings
+      - name: Docker login
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+# Docker build and push
+      - name: build and push docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKER_USERNAME }}/project2:${{ github.run_id }}
+
+  Update_helm_charts:
+    runs-on: ubuntu-latest
+    needs: build-docker-image
+# Update Helm chart values.yaml with new image tag with token authentication
+# why token needed: because github-actions checkout action uses a read-only token by default  and we have to push changes.
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.TOKEN }}
+# Update Helm chart values.yaml using sed command
+      - name: Update Helm Chart values.yaml
+        run: |
+          IMAGE_TAG=${{ secrets.DOCKER_USERNAME }}/project2:${{ github.run_id }}
+          sed -i "s|tag: .*|tag: '${IMAGE_TAG##*:}'|g" Helm/go-web-chart/values.yaml
+# Commit and push the changes back to the repository    
+      - name: Commit and Push changes
+        run: |
+          git config --global user.name "github-actions"
+          git add Helm/go-web-chart/values.yaml
+          git commit -m "Update Helm chart with new image tag ${{ github.run_id }}"
+          git push origin main
