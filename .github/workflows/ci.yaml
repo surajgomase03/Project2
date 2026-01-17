@@ -19,6 +19,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
 #Application build and test
       - name: Application build
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o main .
@@ -33,6 +38,11 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
 
 #Static code analysis using golangci-lint
       - name: Run golangci-lint
