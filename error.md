@@ -1,6 +1,415 @@
-# Docker and Kubernetes Errors - Explanation
+# Project Errors & Solutions Guide
 
-## Error 1: Docker Template and Static Folder Error
+Quick reference for all errors and how to fix them.
+
+---
+
+## Error 1: Template Not Found (Docker)
+
+**Problem:** When running Docker container: `template not found`
+
+**Why:** Missing `templates/` and `static/` folders in Docker image
+
+**Fix:** Update Dockerfile
+
+```dockerfile
+COPY --from=builder /app/main .
+COPY --from=builder /app/templates ./templates    ✅ Add this
+COPY --from=builder /app/static ./static           ✅ Add this
+```
+
+**Test:**
+```bash
+docker build -t surajgomase/project2:v1 .
+docker run -p 8080:8080 surajgomase/project2:v1
+```
+
+---
+
+## Error 2: ImagePullBackOff (Kubernetes)
+
+**Problem:** Kubernetes can't pull image from Docker Hub
+```
+Failed to pull image "surajgomase/project2:v1": manifest not found
+Error: ImagePullBackOff
+```
+
+**Why:** Image exists locally but NOT on Docker Hub
+
+**Fix - Option A (Recommended for Production):**
+```bash
+docker push surajgomase/project2:v1
+```
+
+**Fix - Option B (For Local Development):**
+```bash
+minikube image load surajgomase/project2:v1
+```
+
+---
+
+## Error 3: Helm Release Not Found
+
+**Problem:**
+```
+Error: uninstall: Release not loaded: go-web-app: release: not found
+```
+
+**Why:** Helm chart was never installed
+
+**Fix:**
+```bash
+helm install go-web-app ./go-web-chart
+```
+
+**Verify:**
+```bash
+helm list
+kubectl get pods
+```
+
+---
+
+## Error 4: golangci-lint Version v1.21 Not Supported
+
+**Problem (GitHub Actions):**
+```
+Error: requested golangci-lint version 'v1.21' isn't supported: 
+we support only v1.28.3 and later versions
+```
+
+**Why:** v1.21 is too old
+
+**Fix:** Update `.github/workflows/ci.yaml`
+
+```yaml
+- name: Run golangci-lint
+  uses: golangci/golangci-lint-action@v6
+  with:
+    version: v1.59.1  ✅ Use 1.59.1 or higher
+```
+
+---
+
+## Error 5: Go Version Mismatch (Linter Can't Parse Packages)
+
+**Problem (GitHub Actions):**
+```
+Error: buildir: failed to load package goarch: could not load export data: 
+cannot import "internal/goarch" (unknown bexport format version -1)
+```
+
+**Why:** Go 1.24.11 on GitHub Actions vs Go 1.21 in your Dockerfile - package format mismatch
+
+**Fix:** Add Go 1.21 setup to ALL jobs in `.github/workflows/ci.yaml`
+
+```yaml
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'  ✅ Add this to build job
+
+      - name: Application build
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o main .
+
+  code-quality:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'  ✅ Add this to code-quality job
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.59.1
+```
+
+---
+
+## Error 6: Invalid Parameter 'go-version' for golangci-lint-action
+
+**Problem (GitHub Actions):**
+```
+Warning: Unexpected input(s) 'go-version', valid inputs are 
+['version', 'install-mode', 'working-directory', 'github-token', ...]
+```
+
+**Why:** The `go-version` parameter doesn't exist in golangci-lint-action@v6
+
+**Fix:** Remove `go-version` parameter, use the `Set up Go` step instead (see Error 5)
+
+❌ **Wrong:**
+```yaml
+- name: Run golangci-lint
+  uses: golangci/golangci-lint-action@v6
+  with:
+    version: v1.59.1
+    go-version: '1.21'  ❌ This parameter doesn't exist
+```
+
+✅ **Right:**
+```yaml
+- name: Set up Go
+  uses: actions/setup-go@v4
+  with:
+    go-version: '1.21'  ✅ Correct place for Go version
+
+- name: Run golangci-lint
+  uses: golangci/golangci-lint-action@v6
+  with:
+    version: v1.59.1
+```
+
+---
+
+## Error 7: Unchecked Error from tmpl.Execute() (errcheck)
+
+**Problem (GitHub Actions):**
+```
+Error: main.go:36:14: Error return value of `tmpl.Execute` is not checked (errcheck)
+	tmpl.Execute(w, data)
+	            ^
+```
+
+**Why:** You're not checking if template execution failed
+
+**Fix:** Update `main.go` - check error from `tmpl.Execute()`
+
+❌ **Wrong:**
+```go
+tmpl, err := template.ParseFiles("templates/home.html")
+if err != nil {
+    http.Error(w, err.Error(), http.StatusInternalServerError)
+    return
+}
+tmpl.Execute(w, data)  ❌ Not checking error!
+```
+
+✅ **Right:**
+```go
+tmpl, err := template.ParseFiles("templates/home.html")
+if err != nil {
+    http.Error(w, err.Error(), http.StatusInternalServerError)
+    return
+}
+if err := tmpl.Execute(w, data); err != nil {  ✅ Check error
+    log.Printf("Error executing template: %v", err)
+}
+```
+
+**Do this for ALL 3 handlers:**
+- homeHandler (line 36)
+- aboutHandler (line 50)
+- contactHandler (line 71)
+
+---
+
+## Error 8: Git Push Rejected (Remote Has Changes)
+
+**Problem:**
+```
+To https://github.com/surajgomase03/Project2.git
+ ! [rejected]        main -> main (fetch first)
+error: failed to push some refs to 'https://github.com/surajgomase03/Project2.git'
+hint: Updates were rejected because the remote contains work that you do not
+hint: have locally.
+```
+
+**Why:** Someone else pushed changes to GitHub that you don't have locally
+
+**Fix:** Pull changes first, then push
+
+```bash
+git pull origin main
+git push origin main
+```
+
+**What This Does:**
+1. **git pull** - Fetches remote changes and merges them into your local branch
+2. **git push** - Pushes your local commits to remote
+
+**If There Are Merge Conflicts:**
+```bash
+# Git will mark conflicts in files
+# Edit the files to resolve conflicts
+# Then commit and push
+git add .
+git commit -m "Merge remote changes"
+git push origin main
+```
+
+---
+
+## Error 9: CI Infinite Loop (Helm Updates Trigger CI Again)
+
+**Problem:**
+```
+CI Pipeline runs → Updates Helm chart → Pushes changes → CI triggers again → Updates Helm chart again → Pushes → CI triggers again → LOOP!
+```
+
+**Why This Happens:**
+
+1. CI workflow updates `Helm/go-web-chart/values.yaml` with new Docker image tag
+2. Helm changes are pushed back to GitHub
+3. **Helm/ was NOT in paths-ignore** → CI gets triggered again
+4. CI runs again and updates Helm
+5. Pushes changes → CI triggers again
+6. **Infinite loop! ♻️**
+
+**Visual:**
+```
+Push code → CI starts → Updates Helm → Push to GitHub
+                                            ↓
+                     ← ← ← ← ← ← ← ← ← ← ← ←
+```
+
+**Solution:** Add unnecessary paths to `paths-ignore` in `.github/workflows/ci.yaml`
+
+```yaml
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'docs/**'
+      - 'tests/**'
+      - 'Helm/**'                    ✅ Ignore Helm updates
+      - 'error.md'                   ✅ Ignore docs
+      - 'IMPLEMENTATION.md'
+      - 'README.md'
+      - 'EKS/**'                     ✅ Ignore config folders
+      - 'GITOPS/**'
+      - 'ingress-controller/**'
+```
+
+**How It Works Now:**
+
+1. Push code changes → CI starts ✅
+2. CI updates Helm → Pushes changes
+3. Helm/ is in paths-ignore → **CI does NOT trigger** ✅
+4. **No loop!**
+
+**Files to Ignore:**
+- `Helm/**` - Helm charts (auto-updated by CI)
+- `error.md` - Documentation
+- `IMPLEMENTATION.md` - Documentation
+- `README.md` - Documentation
+- `EKS/**` - EKS config (manual only)
+- `GITOPS/**` - GitOps config (manual only)
+- `ingress-controller/**` - Ingress config (manual only)
+
+**Test It:**
+```bash
+# Make a change in Helm/ and push
+git add Helm/go-web-chart/values.yaml
+git commit -m "test: update Helm values manually"
+git push origin main
+
+# Check GitHub Actions - CI should NOT trigger ✅
+```
+
+---
+
+## Quick Fix Checklist
+
+Copy & paste this to remember what needs to be fixed:
+
+- [ ] **Dockerfile** - Add template/static copies
+  ```bash
+  git add Dockerfile
+  git commit -m "fix: copy templates and static folders in Dockerfile"
+  ```
+
+- [ ] **main.go** - Fix tmpl.Execute() error handling
+  ```bash
+  git add main.go
+  git commit -m "fix: add error handling for tmpl.Execute() calls"
+  ```
+
+- [ ] **.github/workflows/ci.yaml** - Add Go 1.21 setup to all jobs
+  ```bash
+  git add .github/workflows/ci.yaml
+  git commit -m "fix: add Go 1.21 setup to all CI jobs"
+  ```
+
+- [ ] **Push Docker image** - For Kubernetes to pull it
+  ```bash
+  docker build -t surajgomase/project2:v1 .
+  docker push surajgomase/project2:v1
+  ```
+
+- [ ] **Deploy to Kubernetes**
+  ```bash
+  helm install go-web-app ./go-web-chart
+  kubectl get pods
+  ```
+
+---
+
+## Error Summary Table
+
+| # | Error | Cause | Solution |
+|---|-------|-------|----------|
+| 1 | Template not found | Missing files in Docker | Copy templates & static in Dockerfile |
+| 2 | ImagePullBackOff | Image not on Docker Hub | Push image or load to Minikube |
+| 3 | Release not found | Helm not installed | Run `helm install go-web-app ./go-web-chart` |
+| 4 | golangci-lint v1.21 | Old version unsupported | Update to v1.59.1 |
+| 5 | Go package format error | Go version mismatch | Add `Set up Go 1.21` step to all CI jobs |
+| 6 | Invalid go-version param | Wrong action parameter | Remove from golangci-lint, use setup-go instead |
+| 7 | tmpl.Execute unchecked | Missing error check | Add `if err := tmpl.Execute(...)`  |
+
+---
+
+## Testing Each Fix
+
+### Test Docker Build
+```bash
+docker build -t surajgomase/project2:v1 .
+docker run -p 8080:8080 surajgomase/project2:v1
+# Visit http://localhost:8080
+```
+
+### Test Go Build
+```bash
+go build -o main .
+./main
+```
+
+### Test Linting (Local)
+```bash
+golangci-lint run
+```
+
+### Test Kubernetes
+```bash
+helm install go-web-app ./go-web-chart
+kubectl get pods
+kubectl logs <pod-name>
+```
+
+---
+
+## All Changes Summary
+
+**Files Modified:**
+1. `Dockerfile` - Added COPY for templates & static
+2. `main.go` - Added error handling to tmpl.Execute()
+3. `.github/workflows/ci.yaml` - Added Go 1.21 setup, updated golangci-lint to v1.59.1
+
+**All changes pushed to:** `git push origin main`
 
 ### The Problem
 When running the Docker container, you got an error:
@@ -347,7 +756,8 @@ git push origin main
 - [ ] Update Dockerfile to copy templates and static folders
 - [ ] Rebuild Docker image: `docker build -t surajgomase/project2:v1 .`
 - [ ] Push to Docker Hub: `docker push surajgomase/project2:v1`
-- [ ] Update `.github/workflows/ci.yaml` with golangci-lint v1.60.0
-- [ ] Remove invalid `go-version` parameter from CI workflow
+- [ ] Update `.github/workflows/ci.yaml` with Go 1.21 setup
+- [ ] Fix unchecked errors in main.go (tmpl.Execute)
+- [ ] Pull before push: `git pull origin main`
 - [ ] Install Helm chart: `helm install go-web-app ./go-web-chart`
 - [ ] Verify: `kubectl get pods`
