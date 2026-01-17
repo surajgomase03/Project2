@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go_deployment
+  namespace: default
+  labels:
+    app: goapp
+spec:
+  selector:
+    matchLabels:
+      app: goapp
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app: goapp
+    spec:
+      # initContainers:
+        # Init containers are exactly like regular containers, except:
+          # - Init containers always run to completion.
+          # - Each init container must complete successfully before the next one starts.
+      containers:
+      - name:  go_container
+        image:  surajgomase/project2:latest
+        ports:
+        - containerPort: 8080
+
