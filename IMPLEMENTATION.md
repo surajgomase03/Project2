@@ -740,10 +740,399 @@ Check `.github/workflows/ci.yaml` syntax and GitHub Actions logs
 
 ---
 
+## Step 9: ArgoCD Setup (Continuous Deployment)
+
+**Objective:** Set up GitOps-based continuous deployment with ArgoCD
+
+### 9.1 Install ArgoCD on EKS Cluster
+
+**Step 1: Create ArgoCD Namespace**
+
+```bash
+kubectl create namespace argocd
+```
+
+**Step 2: Install ArgoCD**
+
+```bash
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+```
+
+**Step 3: Verify Installation**
+
+```bash
+# Check ArgoCD pods
+kubectl get pods -n argocd
+
+# Expected output:
+# NAME                               READY   STATUS    RESTARTS   AGE
+# argocd-application-controller-0    1/1     Running   0          2m
+# argocd-dex-server-xxxxx            1/1     Running   0          2m
+# argocd-redis-xxxxx                 1/1     Running   0          2m
+# argocd-repo-server-xxxxx           1/1     Running   0          2m
+# argocd-server-xxxxx                1/1     Running   0          2m
+```
+
+### 9.2 Access ArgoCD Server
+
+**Step 1: Get Initial Admin Password**
+
+```bash
+# Get admin password (it's the pod name)
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d; echo
+```
+
+**Step 2: Port Forward to Access UI**
+
+```bash
+kubectl port-forward svc/argocd-server -n argocd 8443:443
+```
+
+**Step 3: Access Web UI**
+
+```
+Open browser: https://localhost:8443
+
+Login credentials:
+- Username: admin
+- Password: <output-from-step-1>
+```
+
+**Step 4: Change Admin Password**
+
+```bash
+# Login via CLI first
+argocd login localhost:8443
+
+# Change password (recommended)
+argocd account update-password
+```
+
+### 9.3 Configure Git Repository
+
+**Step 1: Create GitHub Personal Access Token**
+
+```
+GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)
+- Scope: repo (full control of private repositories)
+- Copy the token
+```
+
+**Step 2: Add Git Repository to ArgoCD**
+
+```bash
+# Via CLI
+argocd repo add https://github.com/<YOUR_USERNAME>/Project2.git \
+  --username <GITHUB_USERNAME> \
+  --password <GITHUB_TOKEN>
+
+# Or via Web UI
+# Settings → Repositories → Connect Repo → HTTPS
+# - Type: git
+# - Repository URL: https://github.com/<YOUR_USERNAME>/Project2.git
+# - Username: <GITHUB_USERNAME>
+# - Password: <GITHUB_TOKEN>
+```
+
+**Step 3: Verify Repository Connection**
+
+```bash
+argocd repo list
+```
+
+### 9.4 Create ArgoCD Application
+
+**Step 1: Create Application via CLI**
+
+```bash
+argocd app create go-web-app \
+  --repo https://github.com/<YOUR_USERNAME>/Project2.git \
+  --rev main \
+  --path Helm/go-web-chart \
+  --dest-server https://kubernetes.default.svc \
+  --dest-namespace default
+```
+
+**Step 2: Or Create Application via YAML**
+
+Create `GITOPS/argocd-application.yaml`:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: go-web-app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/<YOUR_USERNAME>/Project2.git
+    targetRevision: main
+    path: Helm/go-web-chart
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true        # Delete resources no longer in Git
+      selfHeal: true     # Auto-sync when cluster drifts
+    syncOptions:
+      - CreateNamespace=true
+```
+
+Apply the application:
+
+```bash
+kubectl apply -f GITOPS/argocd-application.yaml
+```
+
+**Step 3: Verify Application**
+
+```bash
+# Check application status
+argocd app get go-web-app
+
+# Or via kubectl
+kubectl get applications -n argocd
+```
+
+### 9.5 Configure Auto-Sync
+
+**Option 1: Manual Sync (Default)**
+
+```bash
+# Manual sync via CLI
+argocd app sync go-web-app
+
+# Manual sync via Web UI
+# Applications → go-web-app → Sync → Synchronize
+```
+
+**Option 2: Automatic Sync**
+
+```bash
+# Enable auto-sync
+argocd app set go-web-app --sync-policy automated
+
+# Or in YAML (already configured above):
+spec:
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+```
+
+With auto-sync enabled:
+- ✅ ArgoCD automatically syncs when Git changes
+- ✅ ArgoCD automatically fixes cluster drift
+- ✅ No manual intervention needed
+
+### 9.6 CD Workflow
+
+**How It Works:**
+
+```
+1. Developer pushes code → GitHub
+         ↓
+2. GitHub Actions CI runs → Builds → Pushes Docker image
+         ↓
+3. CI updates Helm chart → Pushes to Git (Helm/go-web-chart/values.yaml)
+         ↓
+4. ArgoCD detects Git change → Pulls new Helm chart
+         ↓
+5. ArgoCD applies changes → kubectl apply Helm chart
+         ↓
+6. Kubernetes pulls new Docker image → Updates pods
+         ↓
+7. ✅ New version running on EKS cluster
+```
+
+### 9.7 Useful ArgoCD Commands
+
+```bash
+# Get application status
+argocd app get go-web-app
+
+# Sync application (manual)
+argocd app sync go-web-app
+
+# Check sync status
+argocd app wait go-web-app --sync
+
+# Refresh application (fetch latest Git)
+argocd app actions run go-web-app refresh
+
+# View application logs
+argocd app logs go-web-app
+
+# Delete application
+argocd app delete go-web-app
+
+# List all applications
+argocd app list
+
+# Get application manifest
+argocd app manifests go-web-app
+```
+
+### 9.8 Monitoring & Troubleshooting
+
+**Check ArgoCD Logs:**
+
+```bash
+# Server logs
+kubectl logs -n argocd argocd-server-xxxxx -f
+
+# Application controller logs
+kubectl logs -n argocd argocd-application-controller-0 -f
+
+# Repo server logs
+kubectl logs -n argocd argocd-repo-server-xxxxx -f
+```
+
+**Check Application Status:**
+
+```bash
+# Get detailed application info
+kubectl describe app go-web-app -n argocd
+
+# Check if synced
+argocd app get go-web-app --refresh
+```
+
+**Common Issues:**
+
+| Problem | Solution |
+|---------|----------|
+| App stuck in "OutOfSync" | Run `argocd app sync go-web-app` |
+| "Unable to connect repository" | Check Git credentials in ArgoCD settings |
+| Pods not updating | Ensure `image.tag` matches in values.yaml |
+| ArgoCD pods not running | Check: `kubectl logs -n argocd <pod-name>` |
+
+### 9.9 Complete CD Setup Checklist
+
+```bash
+# 1. Install ArgoCD
+kubectl create namespace argocd
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+
+# 2. Access ArgoCD
+kubectl port-forward svc/argocd-server -n argocd 8443:443
+# Open: https://localhost:8443
+
+# 3. Login
+argocd login localhost:8443
+
+# 4. Add Git repository
+argocd repo add https://github.com/<YOUR_USERNAME>/Project2.git \
+  --username <GITHUB_USERNAME> \
+  --password <GITHUB_TOKEN>
+
+# 5. Create application
+argocd app create go-web-app \
+  --repo https://github.com/<YOUR_USERNAME>/Project2.git \
+  --rev main \
+  --path Helm/go-web-chart \
+  --dest-server https://kubernetes.default.svc \
+  --dest-namespace default
+
+# 6. Enable auto-sync (optional)
+argocd app set go-web-app --sync-policy automated
+
+# 7. Verify
+argocd app get go-web-app
+kubectl get pods  # Should see go-deployment pods running
+```
+
+### 9.10 End-to-End Validation
+
+**Test the Complete CD Pipeline:**
+
+```bash
+# 1. Make a code change
+# Edit main.go or any source file
+
+# 2. Push to GitHub
+git add .
+git commit -m "feat: test CD pipeline"
+git push origin main
+
+# 3. Watch CI pipeline
+# GitHub Actions → Actions tab → Watch pipeline run
+
+# 4. Check Helm chart was updated
+# GitHub → Helm/go-web-chart/values.yaml → Verify image tag changed
+
+# 5. Check ArgoCD synced changes
+argocd app get go-web-app
+# Should show "Synced" status
+
+# 6. Verify pods restarted with new image
+kubectl get pods
+kubectl describe pod <pod-name>
+# Check Image: field shows new image tag
+
+# 7. Verify application is running
+kubectl port-forward svc/go-service 8080:80
+# Open: http://localhost:8080
+```
+
+---
+
+## Complete CI/CD Architecture
+
+```mermaid
+graph TB
+    A["Git Repository<br/>Developer Code"] -->|git push| B["GitHub<br/>Webhook"]
+    
+    B -->|trigger| C["GitHub Actions<br/>CI Pipeline"]
+    
+    subgraph CI["CI Phase (Build & Test)"]
+        C1["1. Build Job<br/>- go build"]
+        C2["2. Code Quality<br/>- golangci-lint"]
+        C3["3. Docker Build<br/>- docker build<br/>- docker push"]
+        C4["4. Update Helm<br/>- Update values.yaml<br/>- git commit"]
+        C1 --> C2 --> C3 --> C4
+    end
+    
+    C --> CI
+    
+    C4 -->|commit| D["Git Repo Updated<br/>Helm/values.yaml"]
+    
+    D -->|webhook| E["ArgoCD<br/>CD Operator"]
+    
+    subgraph CD["CD Phase (Deploy)"]
+        E1["1. Detect Change<br/>in Git"]
+        E2["2. Pull Helm Chart<br/>Get new image tag"]
+        E3["3. Generate<br/>K8s manifests"]
+        E4["4. Apply to Cluster<br/>kubectl apply"]
+        E5["5. Monitor Rollout<br/>Track pod status"]
+        E1 --> E2 --> E3 --> E4 --> E5
+    end
+    
+    E --> CD
+    
+    E5 -->|deploy| F["EKS Cluster"]
+    
+    F -->|pull image| G["Docker Hub<br/>$DOCKER_USERNAME/project2:new-tag"]
+    
+    F --> H["Kubernetes<br/>Rollout Update"]
+    
+    H -->|terminate old| I["Old Pods<br/>Shutdown"]
+    H -->|create new| J["New Pods<br/>Running Latest Code"]
+    
+    J --> K["✅ Application<br/>Updated Successfully"]
+```
+
+---
+
 ## References
 
 - [Helm Documentation](https://helm.sh/docs/)
 - [Kubernetes Documentation](https://kubernetes.io/docs/)
 - [GitHub Actions Documentation](https://docs.github.com/en/actions)
 - [ArgoCD Documentation](https://argo-cd.readthedocs.io/)
+- [EKS User Guide](https://docs.aws.amazon.com/eks/)
+- [ArgoCD Getting Started](https://argo-cd.readthedocs.io/en/stable/getting_started/)
+- [GitOps Best Practices](https://argo-cd.readthedocs.io/en/stable/operator-manual/best_practices/)
 - [EKS User Guide](https://docs.aws.amazon.com/eks/)
