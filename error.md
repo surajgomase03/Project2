@@ -173,6 +173,66 @@ kubectl describe pod <pod-name>
 
 ---
 
+## Error 4: GitHub Actions golangci-lint Version Error
+
+### Error Message
+```
+Error: Failed to run: Error: requested golangci-lint version 'v1.21' isn't supported: 
+we support only v1.28.3 and later versions
+```
+
+### Root Cause
+Your GitHub Actions CI workflow (`.github/workflows/ci.yaml`) is requesting golangci-lint version `v1.21`, which is no longer supported by the golangci-lint-action. The action only supports versions **v1.28.3 and later**.
+
+### Location
+**File:** `.github/workflows/ci.yaml` (Line 42)
+
+### Current Code (Wrong)
+```yaml
+- name: Run golangci-lint
+  uses: golangci/golangci-lint-action@v6
+  with:
+    version: v1.21
+```
+
+### Solution
+
+Update the version to a supported version:
+
+```yaml
+- name: Run golangci-lint
+  uses: golangci/golangci-lint-action@v6
+  with:
+    version: v1.28.3
+```
+
+Or use the latest version:
+
+```yaml
+- name: Run golangci-lint
+  uses: golangci/golangci-lint-action@v6
+  with:
+    version: v1.59.1
+```
+
+### How to Fix
+
+1. Open `.github/workflows/ci.yaml` in VS Code
+2. Find line 42: `version: v1.21`
+3. Change it to: `version: v1.28.3` (or latest)
+4. Save the file
+5. Commit and push:
+
+```bash
+git add .github/workflows/ci.yaml
+git commit -m "fix: update golangci-lint version to v1.28.3"
+git push origin main
+```
+
+Your GitHub Actions pipeline will now run successfully! ✓
+
+---
+
 ## Summary Table
 
 | Error | Cause | Solution |
@@ -180,6 +240,7 @@ kubectl describe pod <pod-name>
 | Template not found | Missing files in Docker image | Copy templates & static folders in Dockerfile |
 | ImagePullBackOff | Image not on Docker Hub | Push to Docker Hub or load into Minikube |
 | Release not found | Helm not installed | Install Helm chart after fixing image issue |
+| golangci-lint version | v1.21 no longer supported | Update to v1.28.3 or later in ci.yaml |
 
 ---
 
@@ -188,81 +249,6 @@ kubectl describe pod <pod-name>
 - [ ] Update Dockerfile to copy templates and static folders
 - [ ] Rebuild Docker image: `docker build -t surajgomase/project2:v1 .`
 - [ ] Push to Docker Hub: `docker push surajgomase/project2:v1`
+- [ ] Update golangci-lint version in `.github/workflows/ci.yaml`
 - [ ] Install Helm chart: `helm install go-web-app ./go-web-chart`
 - [ ] Verify: `kubectl get pods`
-
-
-# Docker Template and Static Folder Error - Explanation
-
-## The Problem
-When running the Docker container, you got an error:
-```
-template not found
-```
-
-The Go website was trying to load HTML files from the `templates` folder and CSS files from the `static` folder, but these folders were **not inside the Docker container**.
-
-## Why It Happened
-
-### Before Fix (Dockerfile)
-```dockerfile
-COPY --from=builder /app/main .
-```
-
-This only copied the **main binary** (the executable program) to the container. 
-
-The `templates` and `static` folders were left behind on your computer, NOT in the container.
-
-```
-Your Computer:
-├── main (copied ✓)
-├── templates/ (NOT copied ✗)
-├── static/ (NOT copied ✗)
-└── go.mod
-
-Inside Container:
-└── main (only this exists ✗)
-```
-
-## The Solution
-
-### After Fix (Updated Dockerfile)
-```dockerfile
-COPY --from=builder /app/main .
-COPY --from=builder /app/templates ./templates
-COPY --from=builder /app/static ./static
-```
-
-Now we copy **everything needed**:
-- The `main` executable program
-- The `templates` folder with HTML files
-- The `static` folder with CSS files
-
-```
-Inside Container (Now):
-├── main ✓
-├── templates/ ✓
-│   ├── home.html
-│   ├── about.html
-│   └── contact.html
-└── static/ ✓
-    └── style.css
-```
-
-## In Simple Terms
-
-Think of it like packing a suitcase for a trip:
-- **Before**: You only packed your passport (main binary)
-- **After**: You packed your passport + clothes + shoes (main + templates + static)
-
-When the Go website runs inside Docker, it needs ALL these files to work properly. If any are missing, it crashes!
-
-## How to Rebuild
-
-```bash
-docker build -t surajgomase/project1:latest .
-docker push surajgomase/project1:latest
-docker run -p 8080:8080 -it surajgomase/project1:latest
-```
-
-Now visit `http://localhost:8080` and everything should work! ✓
