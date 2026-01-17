@@ -254,13 +254,15 @@ CMD ["./main"]
 ### 2.2 Build Docker Image
 
 ```bash
-docker build -t surajgomase/project2:v1 .
+# Set your Docker Hub username
+export DOCKER_USERNAME=yourusername
+docker build -t $DOCKER_USERNAME/project2:v1 .
 ```
 
 ### 2.3 Test Locally
 
 ```bash
-docker run -p 8080:8080 surajgomase/project2:v1
+docker run -p 8080:8080 $DOCKER_USERNAME/project2:v1
 # Visit http://localhost:8080
 ```
 
@@ -329,7 +331,7 @@ spec:
     spec:
       containers:
       - name: go-app
-        image: surajgomase/project2:v1
+        image: $DOCKER_USERNAME/project2:v1  # Replace with your Docker Hub username
         ports:
         - containerPort: 8080
 ```
@@ -459,7 +461,7 @@ appVersion: "1.0"
 ```yaml
 # values.yaml
 image:
-  repository: surajgomase/project2
+  repository: $DOCKER_USERNAME/project2  # Replace with your Docker Hub username
   tag: "v1"
   pullPolicy: IfNotPresent
 
