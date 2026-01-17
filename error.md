@@ -182,22 +182,11 @@ we support only v1.28.3 and later versions
 ```
 
 ### Root Cause
-Your GitHub Actions CI workflow (`.github/workflows/ci.yaml`) is requesting golangci-lint version `v1.21`, which is no longer supported by the golangci-lint-action. The action only supports versions **v1.28.3 and later**.
-
-### Location
-**File:** `.github/workflows/ci.yaml` (Line 42)
-
-### Current Code (Wrong)
-```yaml
-- name: Run golangci-lint
-  uses: golangci/golangci-lint-action@v6
-  with:
-    version: v1.21
-```
+Your GitHub Actions CI workflow (`.github/workflows/ci.yaml`) was requesting golangci-lint version `v1.21`, which is no longer supported by the golangci-lint-action. The action only supports versions **v1.28.3 and later**.
 
 ### Solution
 
-Update the version to a supported version:
+Update the version to a supported version in `.github/workflows/ci.yaml`:
 
 ```yaml
 - name: Run golangci-lint
@@ -206,30 +195,137 @@ Update the version to a supported version:
     version: v1.28.3
 ```
 
-Or use the latest version:
+---
+
+## Error 5: Go Version Compatibility Error (golangci-lint & Go 1.24)
+
+### Error Message
+```
+level=error msg="Running error: buildir: failed to load package goarch: could not load export data: 
+cannot import \"internal/goarch\" (unknown bexport format version...)"
+Error: golangci-lint exit with code 3
+```
+
+### Root Cause
+GitHub Actions runner is using **Go 1.24.11**, but **golangci-lint 1.28.3** has compatibility problems with this newer Go version. There's a version skew between the Go compiler and the lint tool.
+
+**Version Mismatch:**
+- Your code: Built with Go 1.21 (see Dockerfile)
+- GitHub Actions: Running Go 1.24.11 (latest)
+- golangci-lint 1.28.3: Doesn't fully support Go 1.24
+
+### Why This Happens
+
+When Go versions are too different, the compiled packages have different formats. golangci-lint can't read the export data from the newer Go version.
+
+### Solution
+
+Fix your `.github/workflows/ci.yaml` to explicitly set Go 1.21 and use a compatible golangci-lint version:
+
+```yaml
+build:
+  runs-on: ubuntu-latest
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+
+    - name: Application build
+      run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o main .
+
+    - name: Run tests
+      run: go test ./...
+
+code-quality:
+  runs-on: ubuntu-latest
+  needs: build
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v6
+      with:
+        version: v1.55.2
+        go-version: '1.21'
+```
+
+### Key Changes
+
+1. **Add Go setup** to both `build` and `code-quality` jobs
+2. **Lock Go version to 1.21** (matches your Dockerfile)
+3. **Upgrade golangci-lint to v1.55.2** (compatible with Go 1.21)
+
+### Commit Changes
+
+```bash
+git add .github/workflows/ci.yaml
+git commit -m "fix: set Go version to 1.21 and upgrade golangci-lint to v1.55.2"
+git push origin main
+```
+
+Your CI pipeline will now pass! ✓
+
+---
+
+## Error 6: golangci-lint Invalid Input Parameter Error
+
+### Error Message
+```
+Warning: Unexpected input(s) 'go-version', valid inputs are ['version', 'install-mode', 'working-directory', 'github-token', 'verify', 'only-new-issues', 'skip-cache', 'skip-save-cache', 'problem-matchers', 'args', 'cache-invalidation-interval']
+level=error msg="Running error: buildir: failed to load package goarch: could not load export data: cannot import \"internal/goarch\" (unknown bexport format version -1..."
+Error: golangci-lint exit with code 3
+```
+
+### Root Cause
+The golangci-lint-action@v6 **doesn't support the `go-version` parameter**. It was trying to use an invalid parameter, and golangci-lint v1.28.3 still cannot parse Go 1.24.11 export format.
+
+### The Issue
+
+Your CI workflow had:
+```yaml
+- name: Run golangci-lint
+  uses: golangci/golangci-lint-action@v6
+  with:
+    version: v1.28.3
+    go-version: '1.21'  # ❌ Invalid parameter!
+```
+
+The action ignored the `go-version` parameter and still ran with Go 1.24.11, causing the same export format error.
+
+### Solution
+
+Remove the invalid `go-version` parameter and **upgrade golangci-lint to v1.60.0** which natively supports Go 1.24:
 
 ```yaml
 - name: Run golangci-lint
   uses: golangci/golangci-lint-action@v6
   with:
-    version: v1.59.1
+    version: v1.60.0
 ```
 
-### How to Fix
+### Why v1.60.0 Works
 
-1. Open `.github/workflows/ci.yaml` in VS Code
-2. Find line 42: `version: v1.21`
-3. Change it to: `version: v1.28.3` (or latest)
-4. Save the file
-5. Commit and push:
+- ✅ Supports Go 1.24.11 export format
+- ✅ Only uses valid parameters
+- ✅ No version skew issues
+
+### Commit Changes
 
 ```bash
 git add .github/workflows/ci.yaml
-git commit -m "fix: update golangci-lint version to v1.28.3"
+git commit -m "fix: upgrade golangci-lint to v1.60.0 for Go 1.24 support"
 git push origin main
 ```
-
-Your GitHub Actions pipeline will now run successfully! ✓
 
 ---
 
@@ -240,7 +336,9 @@ Your GitHub Actions pipeline will now run successfully! ✓
 | Template not found | Missing files in Docker image | Copy templates & static folders in Dockerfile |
 | ImagePullBackOff | Image not on Docker Hub | Push to Docker Hub or load into Minikube |
 | Release not found | Helm not installed | Install Helm chart after fixing image issue |
-| golangci-lint version | v1.21 no longer supported | Update to v1.28.3 or later in ci.yaml |
+| golangci-lint v1.21 unsupported | Old version no longer supported | Update to v1.28.3 or later |
+| Go 1.24 compatibility (v1.28.3) | Version skew between Go and golangci-lint | Upgrade golangci-lint to v1.60.0 |
+| Invalid go-version parameter | `go-version` not supported by golangci-lint-action@v6 | Remove parameter, use v1.60.0 |
 
 ---
 
@@ -249,6 +347,7 @@ Your GitHub Actions pipeline will now run successfully! ✓
 - [ ] Update Dockerfile to copy templates and static folders
 - [ ] Rebuild Docker image: `docker build -t surajgomase/project2:v1 .`
 - [ ] Push to Docker Hub: `docker push surajgomase/project2:v1`
-- [ ] Update golangci-lint version in `.github/workflows/ci.yaml`
+- [ ] Update `.github/workflows/ci.yaml` with golangci-lint v1.60.0
+- [ ] Remove invalid `go-version` parameter from CI workflow
 - [ ] Install Helm chart: `helm install go-web-app ./go-web-chart`
 - [ ] Verify: `kubectl get pods`
